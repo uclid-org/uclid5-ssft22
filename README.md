@@ -3,11 +3,24 @@
 
 ## Instructions for setup with docker
 
-### From the Dockerfile
-To create the docker image from the Dockerfile:
+### Starting docker
+On Unix/Linux, start docker with:
 
 ~~~
 sudo service docker start
+~~~
+
+On OSX/Mac, start docker with:
+
+~~~
+open -a Docker
+~~~
+
+### From the Dockerfile
+
+To create the docker image from the Dockerfile:
+
+~~~
 tar -czvf uclid.tar.gz uclid_artefact
 sudo docker build -t uclid_image -f Dockerfile .
 sudo docker run -i -t uclid_image /bin/bash
