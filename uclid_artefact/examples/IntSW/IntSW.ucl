@@ -1,0 +1,170 @@
+module main_func {
+  type pc_t = enum {A, B, C}; // program locations in main
+
+  input enable : boolean; // true iff main can run
+  sharedvar timerCount : integer; // defined in parent module
+  var pc : pc_t; // prog location in main
+
+  init {
+    pc = A;
+  }
+
+  next {
+    if (enable) {
+      case
+        pc == A : {
+          if (timerCount == 0) { pc' = C; }
+          else { pc' = B; }
+        }
+        pc == B : {
+          pc' = A; 
+        }
+        pc == C : {
+          pc' = C;
+        }
+      esac
+    }
+  }
+} // end module main_func
+
+
+module ISR_func {
+ type pc_t = enum {idle, D, E};
+
+ input enable : boolean; // true iff the ISR can run
+ sharedvar timerCount : integer;
+ var pc : pc_t; // prog location for the ISR
+
+ output return_ISR : boolean; // true iff the ISR is returning on that specific step
+
+ init {
+   pc = idle;
+   return_ISR = false;
+ }
+
+ next {
+   if (enable) {
+     case
+       pc == idle : { pc' = D; return_ISR '= false; }
+       pc == D && timerCount != 0 : { pc' = E; return_ISR' = false; }
+       pc == D && timerCount == 0 : { pc' = idle; return_ISR' = true; }
+       pc == E : { timerCount' = timerCount-1; pc' = idle; return_ISR' = true; }
+     esac
+   } else {
+     pc' = pc;
+     return_ISR' = false;
+   }
+ }
+} // end module ISR_func
+
+
+module Sys { // composition of main function and ISR
+
+  type mode_t = enum {main_t, ISR_t};  // type indicates which of the two functions is active
+  type ISR_func_pc_t = ISR_func.pc_t;
+
+  input assert_intr : boolean; // input that is true iff an interrupt has occurred
+
+  var timerCount : integer; // shared variable timerCount
+  var mode : mode_t; // variable indicates which of the two functions is active
+  var M_enable, I_enable: boolean; // M_enable indicates that the main function is enabled to run; I_enable indicates that the ISR is enabled to run
+  var return_ISR : boolean; // indicates that ISR has returned
+
+  // create instances of the main and ISR modules -- these are the functions to be composed
+  instance main_f : main_func (enable : (M_enable), timerCount : (timerCount));
+  instance ISR_f : ISR_func (enable : (I_enable), timerCount : (timerCount), return_ISR : (return_ISR));
+
+  // YOU WILL NEED TO CHANGE WHAT'S INSIDE THIS PROCEDURE
+  // THIS CODE SHOULD ONLY UPDATE THE VARIABLES mode, M_enable, and I_enable
+  procedure update_mode()
+    modifies mode;
+  {
+    havoc mode;
+  }
+  // NO MODIFICATION TO CODE BELOW
+  
+  init {
+    mode = main_t;  // Initially main function is active
+    timerCount = 2; // Initial value of timerCount set to 2 (smaller than in slides to keep counterexamples, etc. small)
+    M_enable = true; 
+    I_enable = false;
+  }
+
+  next {
+    // Note: all parallel assignments
+    call update_mode(); // update to mode take effect on next step
+    // Note these updates use the old value of mode.
+    M_enable' = (mode == main_t);
+    I_enable' = (mode == ISR_t);
+    next (main_f); 
+    next (ISR_f);
+  }
+
+ // PROPERTIES IN Sys MODULE
+ invariant main_ISR_mutex: (M_enable != I_enable);
+ //property[LTL] one_step_ISR_return: G(return_ISR ==> X(!return_ISR));
+ //property[LTL] main_after_ISR: G((I_enable && X(M_enable)) ==> return_ISR);
+ //property[LTL] ISR_after_main: G((M_enable && X(I_enable)) ==> (assert_intr));
+
+ control {
+    // check the invariant/properties.
+    v = bmc(3);
+    check; 
+    print_results;
+    v.print_cex(
+        mode, M_enable, I_enable, 
+        return_ISR, assert_intr,
+        main_f.pc, ISR_f.pc
+    );
+  }
+}
+
+// Module modeling the environment that generates interrupts non-deterministically
+module Env {
+  output assert_intr : boolean; // true iff interrupt is generated on the current step
+
+  init { havoc assert_intr; } // initial value is non-deterministically assigned
+
+  next { havoc assert_intr; } // value on next step is non-deterministically assigned
+}
+
+// Main module composes system and environment
+module main {
+
+  type main_func_pc_t = main_func.pc_t; // import type
+
+  var turn : boolean; // variable indicating whose turn it is to execute
+  var assert_intr : boolean; // variable read by Sys and written by Env
+
+  // create instances of the Env and Sys modules
+  instance Env_i : Env(assert_intr : (assert_intr));
+  instance Sys_i : Sys(assert_intr : (assert_intr));
+
+  // YOU WILL NEED TO MODIFY THE UPDATE TO "turn" IN THE init AND next BLOCKS BELOW
+  init { turn = true; }
+
+  next { 
+    turn' = !turn;
+    if (turn) { 
+      next (Sys_i); 
+    } else { 
+      next (Env_i); 
+    }
+  }
+  // NO MODIFICATIONS BEYOND THIS POINT
+
+  property[LTL] consec_main_pc_values: F(Sys_i.main_f.pc == A && X(Sys_i.main_f.pc == B));
+  //property[LTL] main_reaches_C: F(Sys_i.main_f.pc == C);
+
+  control {
+    vobj = bmc(6);
+    check;
+    print_results;
+    vobj.print_cex(
+        turn, assert_intr, 
+        Sys_i.timerCount, Sys_i.mode,
+        Sys_i.M_enable, Sys_i.I_enable,
+        Sys_i.main_f.pc, Sys_i.ISR_f.pc
+    );
+  }
+}

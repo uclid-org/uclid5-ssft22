@@ -1,0 +1,36 @@
+module main {
+
+  var x : integer;
+  var y : integer;
+
+  procedure update(a : integer, b : integer) returns()
+      modifies x,y;
+   {
+     var t : integer;
+     t = a + b;
+     x = t;
+     y = t;
+   }
+   
+  init {
+     x = 1;
+     y = 1;
+  }
+
+  next {
+     call () = update(x,y); 
+  }
+
+  invariant y_ge_1: (y >= 1);
+  invariant x_ge_0: (x >= 0);
+
+  control {
+     vobj = induction;
+     check;
+     print_results;
+     vobj.print_cex(x,y);
+
+  }
+
+}
+
