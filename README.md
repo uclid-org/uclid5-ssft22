@@ -7,13 +7,17 @@
 To create the docker image from the Dockerfile:
 
 ~~~
-sudo service docker start
+sudo service docker start 
 tar -czvf uclid.tar.gz uclid_artefact
 sudo docker build -t uclid_image -f Dockerfile .
 sudo docker run -i -t uclid_image /bin/bash
 ~~~
 
 You are then inside the docker container. 
+
+Note that the first command in the above sequence is not needed if you are running Docker on Windows/WSL2.
+In that case, you will need to start Docker Desktop directly from Windows, and make sure you have followed
+the instructions here: https://docs.docker.com/desktop/windows/wsl/
 
 ### Using the pre-saved docker image
 
