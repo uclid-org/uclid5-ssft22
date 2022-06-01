@@ -3,6 +3,19 @@
 
 ## Instructions for setup with docker
 
+### Starting Docker
+On Unix/Linux, start docker with:
+
+~~~
+sudo service docker start
+~~~
+
+On OSX/Mac, start docker with:
+
+~~~
+open -a Docker
+~~~
+
 ### From the Dockerfile
 To create the docker image from the Dockerfile:
 
