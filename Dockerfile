@@ -6,7 +6,9 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 RUN apt update
 RUN apt install -y tzdata
 
-RUN apt-get --no-install-recommends -y install \
+RUN apt-get update
+
+RUN apt-get --fix-missing -y install \
         sudo time default-jdk \
         g++ gcc flex bison make git curl patch cmake vim emacs
 
