@@ -34,8 +34,13 @@ the instructions here: https://docs.docker.com/desktop/windows/wsl/
 
 ### Using the pre-saved docker image
 
+If your image is split into several tarballs, first combine them. For example:
 ~~~
 cat uclid_image.tar.gza* >uclid_image.tar.gz
+~~~
+
+Now load the image from the combined tarball (note that a sudo is required on WSL2).
+~~~
 docker load -i uclid_image.tar.gz
 docker run -i -t uclid_image /bin/bash
 ~~~
@@ -49,4 +54,13 @@ The docker image mounts a folder containing the following directories and files:
 delphi. The docker image automatically adds this to the path.
 - uclid_artefact/examples - examples to run UCLID5 on
 - uclid_artefact/uclid - the source code for UCLID5
+
+
+## Other notes:
+
+1. From WSL2, you need to provide sudo permission for any docker related command:
+~~~
+sudo docker <command>
+~~~
+
 
