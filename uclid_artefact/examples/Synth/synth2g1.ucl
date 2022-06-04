@@ -1,0 +1,34 @@
+module main
+{
+  input a, b : integer;
+  var c : integer;
+
+  var myint : integer;
+
+  grammar max_grammar (x : integer, y : integer) : integer = {
+        (start : integer) ::= x | y;
+        (cond : boolean) ::= true | false | isGt(x, y);
+    }
+
+  define isGt(a : integer, b : integer) : boolean = a > b;
+
+  synthesis function max2 (x : integer, y : integer) : integer 
+    grammar max_grammar(x, y);
+
+  init {
+    c = max2(a, b);
+  }
+  
+  next {
+    c' = max2(a, b);
+  }
+  
+  property bigger_than_a : (c >= a);
+  property bigger_than_b : (c >= b);
+  
+  control {
+    unroll(5);
+    check;
+    print_results;
+  }
+}
