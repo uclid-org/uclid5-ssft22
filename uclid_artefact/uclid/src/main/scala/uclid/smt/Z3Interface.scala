@@ -49,6 +49,9 @@ import com.microsoft.z3.enumerations.Z3_lbool
 import com.microsoft.z3.enumerations.Z3_decl_kind
 import com.typesafe.scalalogging.Logger
 
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+
 
 /**
  * Result of solving a Z3 instance.
@@ -58,6 +61,14 @@ class Z3Model(interface: Z3Interface, val model : z3.Model) extends Model {
     interface.exprToZ3(e) match {
       case z3ArrayExpr : z3.ArrayExpr => convertZ3ArrayString(z3ArrayExpr)
       case z3Expr : z3.Expr => model.eval(z3Expr, true).toString
+      case _ => throw new Utils.EvaluationError("Unable to evaluate expression: " + e.toString)
+    }
+  }
+
+  override def evalAsJSON(e : Expr) : JValue = {
+    interface.exprToZ3(e) match {
+      case z3ArrayExpr : z3.ArrayExpr => convertZ3ArrayJSON(z3ArrayExpr)
+      case z3Expr : z3.Expr => JString(model.eval(z3Expr, true).toString)
       case _ => throw new Utils.EvaluationError("Unable to evaluate expression: " + e.toString)
     }
   }
@@ -121,6 +132,62 @@ class Z3Model(interface: Z3Interface, val model : z3.Model) extends Model {
     }}
 
     return output + "-".formatted(s"\n\t%${longest}s : $bottom")
+  }
+
+  def convertZ3ArrayJSON(initExpr : z3.Expr) : JValue = {
+
+    val array : Map[String, String] = Map.empty[String, String]
+    var e    : z3.Expr = model.eval(initExpr, true)
+    var bottom : String = ""
+    var longest : Integer = 1
+    var isNumeral : Boolean = false
+
+
+    while (e.isStore()) {
+      val args : Array[z3.Expr] = e.getArgs()
+      if (!array.contains(args(1).toString)) {
+        array += (args(1).toString -> args(2).toString)
+      }
+      isNumeral = args(1).isNumeral()
+      e = model.eval(args(0), true)
+    }
+
+    if (e.isConstantArray()) {
+      bottom = e.getArgs()(0).toString
+    } else if (e.isAsArray) {
+      var fd : z3.FuncDecl = e.getFuncDecl().getParameters()(0).getFuncDecl()
+      var fint : z3.FuncInterp = null
+    
+      do {
+        fint = model.getFuncInterp(fd)
+
+        for (entry <- fint.getEntries()) {
+          val args : Array[z3.Expr] = entry.getArgs()
+          if (!array.contains(args(0).toString)) {
+            array += (args(0).toString -> entry.getValue().toString)
+          }
+        }
+
+        fd = fint.getElse().getFuncDecl()
+      } while (fint.getElse().getFuncDecl().getDeclKind() == Z3_decl_kind.Z3_OP_UNINTERPRETED)
+
+      bottom = fint.getElse().toString
+    } else {
+      return JString("UCLID is unable to convert this z3 array to string: " + e.toString + "\n").asInstanceOf[JValue]
+    }
+
+    array.foreach{ case (k, v) => {
+        if (!v.contentEquals(bottom) && k.length > longest) {
+            longest = k.length
+        }
+    }}
+ 
+    val sortedArray : ListMap[String,String] = if (isNumeral) 
+        ListMap(array.toSeq.sortWith((x, y) => BigInt(x._1) < BigInt(y._1)):_*) 
+        else ListMap(array.toSeq.sortBy(_._1):_*) 
+    JObject(sortedArray.filter({case (k, v) => !v.contentEquals(bottom)}).map{
+      case (k, v) => (k.toString() -> JString(v.toString()))
+    }.+("-" -> JString(bottom)).toList)
   }
 
   override def evaluate(e : Expr) : Expr = {
@@ -195,7 +262,9 @@ class Z3Interface() extends Context {
   val getUninterpretedSort = new Memo[String, z3.UninterpretedSort]((name) => ctx.mkUninterpretedSort(name))
   lazy val boolSort = ctx.mkBoolSort()
   lazy val intSort = ctx.mkIntSort()
+  lazy val realSort = ctx.mkRealSort()
   val getBitVectorSort = new Memo[Int, z3.BitVecSort]((w : Int) => ctx.mkBitVecSort(w))
+  val getFltSort = new Memo[(Int, Int), z3.FPSort]( (e: (Int, Int)) => ctx.mkFPSort(e._1,e._2))
   val getTupleSort = new Memo[List[Type], z3.TupleSort]((types : List[Type]) => {
     ctx.mkTupleSort(
         getTupleName(), getTupleFieldNames(types.size),
@@ -239,7 +308,9 @@ class Z3Interface() extends Context {
       case UninterpretedType(n) => getUninterpretedSort(n)
       case BoolType             => boolSort
       case IntType              => intSort
+      case RealType             => realSort
       case BitVectorType(w)     => getBitVectorSort(w)
+      case FltType(e,s)         => getFltSort((e,s))
       case TupleType(ts)        => getTupleSort(ts)
       case RecordType(rs)       => getRecordSort(rs)
       case ArrayType(rs, d)     => getArraySort(rs, d)
@@ -262,6 +333,9 @@ class Z3Interface() extends Context {
 
   /** Create an integer literal. */
   val getIntLit = new Memo[BigInt, z3.IntExpr](i => ctx.mkInt(i.toString))
+
+  /** Create a real literal. */
+  val getRealLit = new Memo[(BigInt, String), z3.RealExpr]((rl) => ctx.mkReal(rl._1.toString + "." + rl._2))
 
   /** Create a bitvector literal. */
   val getBitVectorLit = new Memo[(BigInt, Int), z3.BitVecExpr]((arg) => ctx.mkBV(arg._1.toString, arg._2))
@@ -288,7 +362,9 @@ class Z3Interface() extends Context {
       case UninterpretedType(name) => VarSort(getUninterpretedSort(name))
       case BoolType => VarSort(boolSort)
       case IntType => VarSort(intSort)
+      case RealType => VarSort(realSort)
       case BitVectorType(w) => VarSort(getBitVectorSort(w))
+      case FltType(e,s) => VarSort(getFltSort((e,s)))
       case TupleType(ts) => VarSort(getTupleSort(ts))
       case RecordType(rs) => VarSort(getRecordSort(rs))
       case MapType(ins, out) => MapSort(ins, out)
@@ -351,6 +427,19 @@ class Z3Interface() extends Context {
         }
       case IntMulOp               => ctx.mkMul (arithArgs : _*)
       case IntDivOp               => ctx.mkDiv (arithArgs(0), arithArgs(1))
+      case RealLTOp               => ctx.mkLt (arithArgs(0), arithArgs(1))
+      case RealLEOp               => ctx.mkLe (arithArgs(0), arithArgs(1))
+      case RealGTOp               => ctx.mkGt (arithArgs(0), arithArgs(1))
+      case RealGEOp               => ctx.mkGe (arithArgs(0), arithArgs(1))
+      case RealAddOp              => ctx.mkAdd (arithArgs : _*)
+      case RealSubOp              =>
+        if (args.size == 1) {
+          ctx.mkUnaryMinus(arithArgs(0))
+        } else {
+          ctx.mkSub (arithArgs: _*)
+        }
+      case RealMulOp              => ctx.mkMul (arithArgs : _*)
+      case RealDivOp              => ctx.mkDiv (arithArgs(0), arithArgs(1))
       case BVLTOp(_)              => ctx.mkBVSLT(bvArgs(0), bvArgs(1))
       case BVLEOp(_)              => ctx.mkBVSLE(bvArgs(0), bvArgs(1))
       case BVGTOp(_)              => ctx.mkBVSGT(bvArgs(0), bvArgs(1))
@@ -460,10 +549,14 @@ class Z3Interface() extends Context {
       case Lambda(_,_) =>
         throw new Utils.RuntimeError("Lambdas in assertions should have been beta-reduced.")
       case IntLit(i) => getIntLit(i)
+      case RealLit(i,f) => getRealLit(i,f)
       case BitVectorLit(bv,w) => getBitVectorLit(bv, w)
       case BooleanLit(b) => getBoolLit(b)
       case EnumLit(e, typ) => getEnumLit(e, typ)
       case ConstArray(expr, typ) => getConstArray(expr, typ)
+      case r : ConstRecord => 
+        val prodSort = getProductSort(r.typ.asInstanceOf[ProductType])
+        prodSort.mkDecl().apply(typecastAST[z3.Expr](r.fieldvalues.map(f => exprToZ3(f._2))).toSeq : _*)
       case MakeTuple(args) =>
         val tupleSort = getTupleSort(args.map(_.typ))
         tupleSort.mkDecl().apply(typecastAST[z3.Expr](args.map(exprToZ3(_))).toSeq : _*)
@@ -518,7 +611,7 @@ class Z3Interface() extends Context {
       }
       return checkResult
     } else {
-      Utils.writeToFile(f"$filePrefix%s-$curAssertName%s-$curAssertLabel%s-$counten%04d.smt", smtOutput + "\n\n(check-sat)\n(get-info :all-statistics)\n")
+      Utils.writeToFile(f"$filePrefix%s-$curAssertName%s-$curAssertPos%s-$curAssertLabel%s-$counten%04d.smt", smtOutput + "\n\n(check-sat)\n(get-info :all-statistics)\n")
       counten += 1
       return SolverResult(None, None)
     }

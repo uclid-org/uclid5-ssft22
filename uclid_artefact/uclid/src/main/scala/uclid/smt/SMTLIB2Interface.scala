@@ -44,6 +44,11 @@ import scala.collection.mutable.{Map => MutableMap}
 import scala.collection.mutable.{Set => MutableSet}
 import scala.collection.mutable.ListBuffer
 import com.typesafe.scalalogging.Logger
+import uclid.lang.Identifier
+
+import org.json4s._
+import _root_.uclid.lang.Scope
+import _root_.uclid.lang.ExpressionEnvironment
 
 trait SMTLIB2Base {
   val smtlib2BaseLogger = Logger(classOf[SMTLIB2Base])
@@ -57,6 +62,8 @@ trait SMTLIB2Base {
   var enumLiterals : MutableSet[EnumLit] = MutableSet.empty
   var stack : List[(VarSet, LetMap, MutableSet[EnumLit])] = List.empty
   var typeMap : SynonymMap = SynonymMap.empty
+  var disableLetify : Boolean;
+
 
   var counterId = 0
   def getTypeName(suffix: String) : String = {
@@ -126,12 +133,15 @@ trait SMTLIB2Base {
           case IntType =>
             typeMap = typeMap.addSynonym("Int", t)
             ("Int", List.empty)
+          case RealType =>
+            typeMap = typeMap.addSynonym("Real", t)
+            ("Real", List.empty)
           case BitVectorType(n) => 
             val typeStr = "(_ BitVec %d)".format(n)
             typeMap = typeMap.addSynonym(typeStr, t)
             (typeStr, List.empty)
-          case FltType => 
-            val typeStr = "(_ FloatingPoint 8 24)"
+          case FltType(e,s) => 
+            val typeStr = "(_ FloatingPoint "+ e.toString +" "+ s.toString+")"
             typeMap = typeMap.addSynonym(typeStr, t)
             (typeStr, List.empty)
           case MapType(inTypes, outType) =>
@@ -217,6 +227,18 @@ trait SMTLIB2Base {
             assert (newTypes.size == 0)
             val str = "((as const %s) %s)".format(typName, eP.exprString())
             (str, memoP, shouldLetify)
+          case r : ConstRecord =>
+            val productType = r.typ.asInstanceOf[ProductType]
+            val typeName = typeMap.get(r.typ).get.name
+            val mkTupleFn = Context.getMkTupleFunction(typeName)
+            val indexedFields = r.fieldvalues.map(f => (productType.fieldIndex(f._1), f._2)).sortBy(_._1)
+            var memoP = memo
+            val fields = indexedFields.map{ f =>
+              val (value, memoP1) = translateExpr(f._2, memoP, shouldLetify)
+              memoP = memoP1
+              value.exprString()
+            }.mkString(" ")
+            ("(" + mkTupleFn + " " + fields + ")", memoP, shouldLetify)
           case OperatorApplication(RecordUpdateOp(fld), operands) =>
             val productType = operands(0).typ.asInstanceOf[ProductType]
             val typeName = typeMap.get(operands(0).typ).get.name
@@ -273,18 +295,22 @@ trait SMTLIB2Base {
             throw new Utils.AssertionError("Lambdas in should have been beta-reduced by now.")
           case IntLit(value) =>
             (value.toString(), memo, false)
+          case RealLit(i, f) =>
+            (i.toString()+"."+f, memo, false)
           case BitVectorLit(value, width) =>
             ("(_ bv" + value.toString() + " " + width.toString() + ")", memo, false)
-          case FloatLit(integral,fractional) =>
+          case FloatLit(integral,fractional, exp, sig) =>
+          {
             if(integral >= 0)
-              ("((_ to_fp 8 24) roundNearestTiesToEven "+integral.toString() + "." + fractional.toString + ")", memo, false)
+              ("((_ to_fp "+exp.toString+ " "+ sig.toString+ ") roundNearestTiesToEven "+integral.toString() + "." + fractional.toString + ")", memo, false)
             else
-              ("((_ to_fp 8 24) roundNearestTiesToEven (-"+integral.toString() + "." + fractional.toString + "))", memo, false)
+              ("((_ to_fp "+exp.toString+ " "+ sig.toString+ ") roundNearestTiesToEven (-"+integral.toString() + "." + fractional.toString + "))", memo, false)
+          }
   
           case BooleanLit(value) =>
             (value match { case true => "true"; case false => "false" }, memo, false)
         }
-        val translatedExpr = if (letify && shouldLetify) {
+        val translatedExpr = if (letify && shouldLetify & !disableLetify) {
           TranslatedExpr(memoP.size, exprStr, Some(getLetVariableName()))
         } else {
           TranslatedExpr(memoP.size, exprStr, None)
@@ -295,7 +321,7 @@ trait SMTLIB2Base {
   }
   def translateExpr(e : Expr, shouldLetify : Boolean) : String = {
     val (trExpr, memoP) = translateExpr(e, Map.empty, shouldLetify)
-    val resultString = if (shouldLetify) {
+    val resultString = if (shouldLetify && !disableLetify) {
       if (memoP.size == 0) {
         trExpr.exprString()
       } else {
@@ -324,24 +350,60 @@ trait SMTLIB2Base {
 }
 
 class SMTLIB2Model(stringModel : String) extends Model {
-  val model =  SExprParser.parseModel(stringModel)
+  val model : AssignmentModel = SExprParser.parseModel(stringModel)
+
+  val modelUclid = SExprParser.parseModelUclidLang(stringModel)
 
   override def evaluate(e : Expr) : Expr = {
     throw new Utils.UnimplementedException("evaluate not implemented yet.")
   }
 
-  override def evalAsString(e : Expr)  : String = {
-    val definitions = model.functions.filter(fun => fun.asInstanceOf[DefineFun].id.toString() contains e.toString())
+  override def evalAsString(e : Expr) : String = {
+    val definitions = model.functions.filter(fun => fun._1.asInstanceOf[DefineFun].id.toString() contains e.toString())
     Utils.assert(definitions.size < 2, "More than one definition found!")
     definitions.size match {
       case 0 =>
         e.toString()
       case 1 =>
-        definitions(0).asInstanceOf[DefineFun].e.toString()
+        definitions(0)._1.asInstanceOf[DefineFun].e.toString()
       case _ =>
         throw new Utils.RuntimeError("Found more than one definition in the assignment model!")
     }
+  }
 
+
+  /**
+    * This does best effort parsing from a UclidDefine body expr.
+    *   to a "synthesizable" UclidExpr.
+    *
+    * On failure returns None.
+    */
+  def evalAsUclid (e : Expr) : Option[lang.Expr] = {
+    val definitions = modelUclid.functions.filter(fun => fun._1.asInstanceOf[lang.DefineDecl].id.toString() contains e.toString())
+    Utils.assert(definitions.size < 2, "More than one definition found!")
+    definitions.size match {
+      case 0 => None
+      case 1 => definitions(0)._1.asInstanceOf[lang.DefineDecl].expr.codegenUclidLang
+      case _ => throw new Utils.RuntimeError("Found more than one definition in the assignment model!")
+    }
+  }
+
+  /**
+    * This tries a to generate a valid raw uclid string.
+    *   If that fails, it returns the SMTLIB string.
+    */
+  override def evalAsJSON (e : Expr) : JValue = {
+    val definitions = modelUclid.functions.filter(fun => fun._1.asInstanceOf[lang.DefineDecl].id.toString() contains e.toString())
+    Utils.assert(definitions.size < 2, "More than one definition found!")
+    definitions.size match {
+      case 0 => JString(e.toString())
+      case 1 => evalAsUclid(e) match {
+          case Some(eP) => JString(eP.toString)
+          case None => JString(definitions(0)._2)
+        }
+      case _ =>
+        throw new Utils.RuntimeError("Found more than one definition in the assignment model!")
+    }
   }
 
   override def toString() : String = {
@@ -349,7 +411,7 @@ class SMTLIB2Model(stringModel : String) extends Model {
   }
 }
 
-class SMTLIB2Interface(args: List[String]) extends Context with SMTLIB2Base {
+class SMTLIB2Interface(args: List[String], var disableLetify: Boolean=false) extends Context with SMTLIB2Base {
   val smtlibInterfaceLogger = Logger(classOf[SMTLIB2Interface])
 
   type NameProviderFn = (String, Option[String]) => String
@@ -475,7 +537,7 @@ class SMTLIB2Interface(args: List[String]) extends Context with SMTLIB2Base {
             case "sat" => SolverResult(Some(true), if(produceModel) getModel() else None)
             case "unsat" => SolverResult(Some(false), None)
             case _ =>
-              throw new Utils.AssertionError("Unexpected result from SMT solver: " + str.toString())
+              throw new Utils.AssertionError("Response from solver: " + str.toString())
           }
         case None =>
           throw new Utils.AssertionError("Unexpected EOF result from SMT solver.")

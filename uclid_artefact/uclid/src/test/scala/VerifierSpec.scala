@@ -44,6 +44,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import java.io.File
 import uclid.{lang => l}
 
+import org.json4s.jackson.JsonMethods._
+import org.json4s.JString
+
 object VerifierSpec {
   def expectedFails(filename: String, nFail : Int, config: Option[UclidMain.Config]=None) : String = {
     UclidMain.enableStringOutput()
@@ -58,6 +61,22 @@ object VerifierSpec {
     val outputString = UclidMain.stringOutput.toString()
     assert (results.count((e) => e.result.isFalse) == nFail)
 
+    assert (results.count((e) => e.result.isUndefined) == 0)
+    outputString
+  }
+
+  def expectedFailsMultipleFiles(filenames: List[String], nFail : Int, config: Option[UclidMain.Config]=None) : String = {
+    UclidMain.enableStringOutput()
+    UclidMain.clearStringOutput()
+    val compileConfig = if (config.isDefined) config.get else UclidMain.Config(files=filenames.map(f => new File(f)))
+    val modules = UclidMain.compile(compileConfig, lang.Identifier("main"), true)
+    val instantiateConfig = UclidMain.Config()
+    val mainModule = UclidMain.instantiate(instantiateConfig, modules, l.Identifier("main"))
+    assert (mainModule.isDefined)
+    // val config = UclidMain.Config("main", List("/usr/bin/z3", "-in", "-smt2"), List.empty)
+    val results = UclidMain.execute(mainModule.get, instantiateConfig)
+    val outputString = UclidMain.stringOutput.toString()
+    assert (results.count((e) => e.result.isFalse) == nFail)
     assert (results.count((e) => e.result.isUndefined) == 0)
     outputString
   }
@@ -120,6 +139,12 @@ class VerifierSanitySpec extends AnyFlatSpec {
   "test-assume-primed-var.ucl" should "verify all but 6 assertions." in {
     VerifierSpec.expectedFails("./test/test-assume-primed-var.ucl", 6)
   }
+  "test-real-1.ucl" should "verify all assertions." in{
+    VerifierSpec.expectedFails("./test/test-real-1.ucl", 0)
+  }
+  "test-real-2.ucl" should "fail to verify 3 assertions." in{
+    VerifierSpec.expectedFails("./test/test-real-2.ucl", 3)
+  }
 }
 class BasicVerifierSpec extends AnyFlatSpec {
   "test-bv-assign.ucl" should "verify successfully." in {
@@ -158,6 +183,35 @@ class BasicVerifierSpec extends AnyFlatSpec {
   "test-record-1.ucl" should "verify successfully." in {
     VerifierSpec.expectedFails("./test/test-record-1.ucl", 0)
   }
+  "test-record-update-op-1.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-1.ucl", 1)
+  }
+  "test-record-update-op-5.ucl" should "fail to verify 2 assertions." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-5.ucl", 2)
+  }
+  "test-record-update-op-6.ucl" should "verify successfully." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-6.ucl", 0)
+  }
+  "test-record-update-op-7.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-7.ucl", 1)
+  }
+  "test-record-update-op-8.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-8.ucl", 1)
+  }
+  "test-record-update-op-11.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-11.ucl", 1)
+  }
+
+  "test-const-record-1.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-const-record-1.ucl", 1)
+  }
+  "test-const-record-4.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-const-record-4.ucl", 0)
+  }
+  "test-const-record-6.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-const-record-6.ucl", 1)
+  }
+
   "test-tuple-record-1.ucl" should "verify successfully." in {
     VerifierSpec.expectedFails("./test/test-tuple-record-1.ucl", 0)
   }
@@ -330,6 +384,9 @@ class ProcedureVerifSpec extends AnyFlatSpec {
   "test-mod-set-analysis-5.ucl" should "verify all assertions" in {
     VerifierSpec.expectedFails("./test/test-mod-set-analysis-5.ucl", 0, Some(ConfigCons.createConfigWithMSA("test/test-mod-set-analysis-5.ucl")))
   }
+  "test-mod-set-analysis-7.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-mod-set-analysis-7.ucl", 1, Some(ConfigCons.createConfigWithMSA("test/test-mod-set-analysis-7.ucl")))
+  }
 }
 class InductionVerifSpec extends AnyFlatSpec {
   "test-k-induction-1.ucl" should "verify all assertions." in {
@@ -362,6 +419,19 @@ class InductionVerifSpec extends AnyFlatSpec {
   "test-tuple.ucl" should "verify all assertions." in {
     VerifierSpec.expectedFails("./test/test-tuple.ucl", 0)
   }
+  "test-record-update-op-9.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-9.ucl", 0)
+  }
+  "test-record-update-op-10.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-record-update-op-10.ucl", 0)
+  }
+  "test-const-record-3.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-const-record-3.ucl", 0)
+  }
+  "test-const-record-7.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-const-record-7.ucl", 0)
+  }
+
 }
 class QuantifierVerifSpec extends AnyFlatSpec {
   "test-forall-0.ucl" should "verify all assertions." in {
@@ -494,10 +564,16 @@ class ModuleVerifSpec extends AnyFlatSpec {
   "test-macro-4.ucl" should "fail to verify 1 assertion." in {
     VerifierSpec.expectedFails("./test/test-macro-4.ucl", 1)
   }
+  "test-bmc-4.ucl" should "fail to verify 1 assertion." in {
+    VerifierSpec.expectedFails("./test/test-bmc-4.ucl", 1)
+  }
 }
 class LTLVerifSpec extends AnyFlatSpec {
   "test-history-1.ucl" should "verify all assertions." in {
     VerifierSpec.expectedFails("./test/test-history-1.ucl", 0)
+  }
+  "test-history-2.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-history-2.ucl", 1)
   }
   // "test-ltl-0-safe.ucl" should "verify all assertions." in {
   //   VerifierSpec.expectedFails("./test/test-ltl-0-safe.ucl", 0)
@@ -567,6 +643,12 @@ class HyperPropertySpec extends AnyFlatSpec {
   "test-hyperproperty-4.ucl" should "verify all assertions." in {
     VerifierSpec.expectedFails("./test/test-hyperproperty-4.ucl", 0)
   }
+  "test-hyperproperty-6.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-hyperproperty-6.ucl", 0)
+  }
+  "test-hyperproperty-7.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFails("./test/test-hyperproperty-7.ucl", 0)
+  }
 }
 
 object PrintCexSpec {
@@ -599,6 +681,47 @@ object PrintCexSpec {
       }
     }
   }
+  def checkJSONCex (filename : String, n : Int, cex_lens : List[Int], cexfile : String = "") {
+    UclidMain.enableStringOutput()
+    UclidMain.clearStringOutput()
+    val modules = UclidMain.compile(
+      UclidMain.Config(files=List(new File(filename))),
+      lang.Identifier("main"), true
+    )
+    val mainModule = UclidMain.instantiate(UclidMain.Config(), modules, l.Identifier("main"))
+    assert (mainModule.isDefined)
+    val config = UclidMain.Config(smtSolver=List("z3", "-in"), jsonCEXfile=cexfile)
+    val results = UclidMain.execute(mainModule.get, config)
+    val outputString = UclidMain.stringOutput.toString()
+    val lines1 = outputString.split('\n')
+    val check = "FAILED -> v [Step #%d]".format(n-1)
+    assert (lines1.exists(l => l.contains(check)))
+    val lines2 = lines1.filter(l => !l.contains("===="))
+    cex_lens.foreach {
+      len =>
+        val checklen = "Generated CEX trace of length %d".format(len)
+        assert (lines2.exists(l => l.contains(checklen)))
+    }
+    val checkfilemsg = cexfile.isEmpty match {
+      case true  => "Wrote CEX traces to file: cex.json"
+      case false => s"Wrote CEX traces to file: ${cexfile}.json"
+    }
+    assert (lines2.exists(l => l.contains(checkfilemsg)))
+    // Cleanup generated file
+    val actual_cexfile = if (cexfile.isEmpty()) "cex.json" else s"${cexfile}.json"
+    new File(actual_cexfile).delete()
+  }
+  def checkSExprToUclidLang (filename : String) : String = {
+    UclidMain.enableStringOutput()
+    UclidMain.clearStringOutput()
+    UclidMain.clearJSONString()
+    val modules = UclidMain.compile(ConfigCons.createConfig(filename), lang.Identifier("main"), true)
+    val mainModule = UclidMain.instantiate(UclidMain.Config(), modules, l.Identifier("main"))
+    assert (mainModule.isDefined)
+    val config = UclidMain.Config(smtSolver=List("z3", "-in"))
+    val results = UclidMain.execute(mainModule.get, config)
+    UclidMain.jsonString.toString()
+  }
 }
 class PrintCexSpec extends AnyFlatSpec {
   "test-bmc-0.ucl" should "print a one-step CEX" in {
@@ -612,5 +735,151 @@ class PrintCexSpec extends AnyFlatSpec {
   }
   "test-bmc-5.ucl" should "print a 6-step CEX" in {
     PrintCexSpec.checkPrintCex("test/test-bmc-5.ucl", 6)
+  }
+  "test-k-induction-5.ucl" should "print a 4-step CEX" in {
+    VerifierSpec.expectedFails("./test/test-k-induction-5.ucl", 1)
+  }
+  "test-cex-json-bmc.ucl" should "generate a 3 JSON CEX traces" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-bmc.ucl", 4, List(4, 5, 6), "cex")
+  }
+  "test-cex-json-arrays-1.ucl" should "generate a JSON CEX trace" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-arrays-1.ucl", 6, List(2, 3, 4, 5, 6), "tweedledee")
+  }
+  "test-cex-json-arrays-2.ucl" should "generate a JSON CEX trace" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-arrays-2.ucl", 4, List(4), "tweedledum")
+  }
+  "test/test-cex-json-enum.ucl" should "generate a JSON CEX trace" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-enum.ucl", 6, List(2, 3, 4, 5, 6))
+  }
+  "test/test-cex-json-mixed.ucl" should "generate a JSON CEX trace" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-mixed.ucl", 4, List(4))
+  }
+  "test/test-cex-json-record.ucl" should "generate a JSON CEX trace" in {
+    PrintCexSpec.checkJSONCex("test/test-cex-json-record.ucl", 3, List(1, 2))
+  }
+  "test-sexpr-uclid-lang-records-1.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-records-1.ucl"))
+    val str0 = ((json \ "property__trivial__0" \ "trace")(0) \ "cache1")(0)
+    str0 match {
+      case JString(s) => assert(s.contains("update-field _field_value"))
+      case _ => assert(false)
+    }
+    val str1 = ((json \ "property__trivial__1" \ "trace")(1) \ "cache1")(0)
+    str1 match {
+      case JString(s) => assert(s.equals("const_record(valid := false, value := 0)"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-records-2.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-records-2.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(0) \ "cache1")(0)
+    str0 match {
+      case JString(s) => assert(s.contains("update-field _field_value")) 
+      case _ => assert(false)
+    }
+    val str1 = ((json \ "property__trivial__1" \ "trace")(1) \ "cache1")(0)
+    str1 match {
+      case JString(s) => assert(s.equals("const_record(valid := false, value := const(0bv32, [bv4]bv32))"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-arrays-1.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-arrays-1.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(1) \ "database")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("(const(3, [integer]integer))[2 -> 4]"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-enums-1.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-enums-1.ucl"))
+    val str0 = ((json \ "property__trivial__0" \ "trace")(2) \ "color")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("YELLOW"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-mixed-1.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-mixed-1.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(1) \ "database")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("(const(const_record(uid := 2, color := false), [integer]utype_t))[2 -> const_record(uid := 3, color := false)]"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-mixed-2.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-mixed-2.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(1) \ "database")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("(const(BLUE, [integer]color_t))[2 -> RED]"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-mixed-3.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-mixed-3.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(1) \ "database")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("(const(const_record(uid := 2, color := RED), [integer]utype_t))[2 -> const_record(uid := 3, color := RED)]"))
+      case _ => assert(false)
+    }
+  }
+  "test-sexpr-uclid-lang-uninterp-type.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-uninterp-type.ucl"))
+    val str0 = ((json \ "property__trivial__1" \ "trace")(1) \ "database")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("(const(utype_t!val!0, [integer]utype_t))[2 -> utype_t!val!1]"))
+      case _ => assert(false)
+    }
+  }
+  
+  "test-sexpr-uclid-lang-uninterp-type-2.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-uninterp-type-2.ucl"))
+    val str0 = ((json \ "property__a_equal_b__0" \ "trace")(0) \ "a")(0)
+    str0 match {
+      case JString(s) => assert(s.equals("ValueSpace!val!0"))
+      case _ => assert(false)
+    }
+    val str1 = ((json \ "property__a_equal_b__0" \ "trace")(0) \ "b")(0)
+    str1 match {
+      case JString(s) => assert(s.equals("ValueSpace!val!1"))
+      case _ => assert(false)
+    }
+  }
+  
+  "test-sexpr-uclid-lang-uninterp-type-3.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-uninterp-type-3.ucl"))
+    val str0 = ((json \ "property__trivial__0" \ "trace")(0) \ "database_1")(0)
+    str0 match {
+      case JString(s) => assert(s.contains("const(UndefineType!val!"))
+      case _ => assert(false)
+    }
+     val str1 = ((json \ "property__trivial__1" \ "trace")(1) \ "database_1")(0)
+     str1 match {
+       case JString(s) => assert(s.contains("const(UndefineType!val!"))
+       case _ => assert(false)
+    }
+  }
+  
+  "test-sexpr-uclid-lang-uninterp-type-4.ucl" should "generate UclidLang JSON cex" in {
+    val json = parse(PrintCexSpec.checkSExprToUclidLang("./test/test-sexpr-uclid-lang-uninterp-type-4.ucl"))
+    val str0 = ((json \ "property__graph__0" \ "trace")(0) \ "map")(0)
+    str0 match {
+      case JString(s) => assert(s.contains("(let (("))
+      case _ => assert(false)
+    }
+  }  
+
+  
+}
+class ModuleConcatSpec extends AnyFlatSpec {
+  "test-concat-modules-w-init-2-fab.ucl" should "verify all assertions." in {
+    VerifierSpec.expectedFailsMultipleFiles(List(
+      "test/test-concat-modules-w-init-2-fa.ucl", "test/test-concat-modules-w-init-2-fb.ucl"
+    ), 0)
+  }
+  "test-concat-modules-w-init-2-fba.ucl" should "fail to verify assertion." in {
+    VerifierSpec.expectedFailsMultipleFiles(List(
+      "test/test-concat-modules-w-init-2-fb.ucl", "test/test-concat-modules-w-init-2-fa.ucl"
+    ), 2)
   }
 }

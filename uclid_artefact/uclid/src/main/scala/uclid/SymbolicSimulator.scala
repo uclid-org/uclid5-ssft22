@@ -40,6 +40,8 @@
 
 package uclid
 
+import java.io._
+
 import lang._
 import vcd.VCD
 
@@ -51,6 +53,13 @@ import uclid.smt.Z3Interface
 import scala.collection.mutable.{Map => MutableMap}
 import org.scalactic.source.Position
 import scala.util.parsing.input.NoPosition
+
+import org.json4s._
+import org.json4s.JsonDSL._
+import org.json4s.jackson.JsonMethods._
+import scala.collection.mutable
+import uclid.smt.SMTLIB2Interface
+import uclid.smt.Context
 
 object UniqueIdGenerator {
   var i : Int = 0;
@@ -127,8 +136,8 @@ class SymbolicSimulator (module : Module) {
 
   /** Helper that converts a scope grammar to GrammarSymbol
    *
-   *  @grammar the scope grammar to convert
-   *  @scope current context
+   *  grammar the scope grammar to convert
+   *  scope current context
    */
   def grammarToGrammarSymbol(gSym: lang.Identifier, typ : lang.FunctionSig, scope: lang.Scope): smt.GrammarSymbol = {
     val getgrammar = scope.get(gSym)
@@ -249,12 +258,27 @@ class SymbolicSimulator (module : Module) {
           case "bmc" =>
           // do the LTL properties
             assertionTree.startVerificationScope()
+            var simulationDone=false;
 
-            if(hasNonLTLprop(module.properties))
-              prove(false, hasHyperInvariant(module.properties), cmd)
-
+            // do LTL properties
             if(hasLTLprop(module.properties))
+            {
               prove(true, hasHyperInvariant(module.properties), cmd)
+              simulationDone=true;
+            }
+
+            // do nonLTL globalproperties e.g., invariants
+            if(hasNonLTLprop(module.properties))
+            {
+              prove(false, hasHyperInvariant(module.properties), cmd) 
+              simulationDone=true;
+            }
+            
+            // but even if we didn't have LTL or nonLTL global properties, we might still have
+            // inline assertions, so we must run the symbolic simulator
+            // to check those
+            if(!simulationDone)
+              prove(false, hasHyperInvariant(module.properties), cmd) 
 
             check(solver, config, cmd);
             needToPrintResults=true
@@ -338,6 +362,11 @@ class SymbolicSimulator (module : Module) {
             needToPrintResults=false
           case "print_cex" =>
             printCEX(proofResults, cmd.args, cmd.argObj)
+          case "print_cex_json" =>
+            if (!config.smtSolver.isEmpty)
+              printCEXJSON(proofResults, cmd.args, cmd.argObj, config, solver)
+            else
+              UclidMain.printError("print_cex_json works only with SMTLIB2Interface, skipping this command.")
           case "dump_cex_vcds" =>
             dumpCEXVCDFiles(proofResults)
           case "print_module" =>
@@ -839,6 +868,7 @@ class SymbolicSimulator (module : Module) {
       case smt.BitVectorLit(bv, w) => List()
       case smt.EnumLit(id, eTyp) => List()
       case smt.ConstArray(v, arrTyp) => List()
+      case smt.ConstRecord(fs) => List()
       case smt.MakeTuple(args) => args.flatMap(e => getHyperSelects(e))
       case opapp : smt.OperatorApplication =>
         val op = opapp.op
@@ -911,6 +941,7 @@ class SymbolicSimulator (module : Module) {
       case smt.BitVectorLit(bv, w) => List()
       case smt.EnumLit(id, eTyp) => List()
       case smt.ConstArray(v, arrTyp) => List()
+      case smt.ConstRecord(fs) => List()
       case smt.MakeTuple(args) => args.flatMap(e => getHavocs(e))
       case opapp : smt.OperatorApplication =>
         val op = opapp.op
@@ -1000,6 +1031,7 @@ class SymbolicSimulator (module : Module) {
       case smt.BitVectorLit(bv, w) => e
       case smt.EnumLit(id, eTyp) => e
       case smt.ConstArray(exp, arrTyp) => smt.ConstArray(_substitute(exp, sym), arrTyp)
+      case smt.ConstRecord(fs) => smt.ConstRecord(fs.map(f => (f._1, _substitute(f._2, sym))))
       case smt.MakeTuple(args) => smt.MakeTuple(args.map(e => _substitute(e, sym)))
       case opapp : smt.OperatorApplication =>
         val op = opapp.op
@@ -1134,7 +1166,7 @@ class SymbolicSimulator (module : Module) {
       val simTbl = ArrayBuffer(frameList)
       // FIXME: simTable
       addModuleAssumptions(currentState, frameList, numPastFrames, scope, addAssumptionToTree _)
-      if (assertProperties) { addAsserts(step, currentState, frameList, simTbl, label, scope, propertyFilter, addAssertToTree _)  }
+      if (assertProperties) { addAsserts(step+startStep, currentState, frameList, simTbl, label, scope, propertyFilter, addAssertToTree _)  }
       else { assumeAssertions(currentState, frameList, numPastFrames, scope, propertyFilter, addAssumptionToTree _) }
     }
     symbolTable = currentState
@@ -1251,6 +1283,98 @@ class SymbolicSimulator (module : Module) {
       }
     }}
   }
+
+  def printCEXJSON(results : List[CheckResult], exprs : List[(Expr, String)], arg : Option[Identifier], config : UclidMain.Config, solver : Context) {
+    def labelMatches(p : AssertInfo) : Boolean = {
+      arg match {
+        case Some(id) => id.toString == p.label || p.label.startsWith(id.toString + ":")
+        case None => true
+      }
+    }
+    val isSMTLIB2Interface : Boolean = solver.isInstanceOf[SMTLIB2Interface] 
+    if (isSMTLIB2Interface) {
+      ULContext.extractPostTypeMap(solver.asInstanceOf[SMTLIB2Interface].typeMap)
+    }
+
+    // One property can have multiple violating cexes, so index them
+    val prop_counter : ObjectCounter[String] = new ObjectCounter[String]()
+    UclidMain.printStatus("=================================")
+    // Get each counterexample trace
+    val jsonobj : JObject = JObject(results.filter(res => labelMatches(res.assert) && res.result.isModelDefined).map{(result) => {
+      val prop_name : String = result.assert.name.split("\\s+").mkString("__")
+      ((prop_name + "__" + prop_counter.incrCount(prop_name).toString()) 
+        -> printCEXJSON(result, exprs))
+    }})
+    // Write counterexample trace
+    if (jsonobj.values.size > 0) {
+      val filename : String = config.jsonCEXfile.isEmpty match {
+        case true => "cex.json"
+        case false => (config.jsonCEXfile + ".json")
+      }
+      val fh  = new File(filename)
+      val bw  = new BufferedWriter(new FileWriter(fh))
+      val jsonStr = pretty(render(jsonobj))
+      bw.write(jsonStr)
+      bw.close()
+      UclidMain.setJSONString(jsonStr)
+      UclidMain.printStatus("Wrote CEX traces to file: " + filename)
+    }
+  }
+  // Helper utility to print JSON traces for a single property
+  def printCEXJSON(res : CheckResult, exprs : List[(Expr, String)]) : JObject = {
+    UclidMain.printStatus("CEX for %s".format(res.assert.toString, res.assert.pos.toString))
+    val scope = res.assert.context
+    lazy val instVarMap = module.getAnnotation[InstanceVarMapAnnotation]().get
+
+    val exprsToPrint : List[(Expr, String)] = if (exprs.size == 0) {
+      val vars = ((scope.inputs ++ scope.vars ++ scope.outputs).map { 
+        p => {
+          instVarMap.rMap.get(p.id) match {
+            case Some(str) => (p.id, str)
+            case None => (p.id, p.id.toString)
+          }
+        }
+      })
+      vars.toList.sortWith((l, r) => l._2 < r._2)
+    } else {
+      exprs
+    }
+
+    frameLog.debug("Assertion: {}", res.assert.expr.toString())
+    frameLog.debug("FrameTable: {}", res.assert.frameTable.toString())
+
+    val model = res.result.model.get
+    val simTable = res.assert.frameTable
+    Utils.assert(simTable.size >= 1, "Must have at least one trace")
+    val lastFrame = res.assert.iter
+    val json_trace : JArray = JArray(((0 to lastFrame).map { case (i) => {
+      try {
+          printFrameJSON(simTable, i, model, exprsToPrint, scope)
+      } catch {
+          case _ : Throwable => {
+            UclidMain.printError("error: unable to parse counterexample frame")
+            JString("error: unable to parse counterexample frame")
+          }
+      }
+    }}).toList)
+    UclidMain.printStatus("Generated CEX trace of length " + (lastFrame + 1).toString())
+    UclidMain.printStatus("=================================")
+    JObject(List(JField("length", JInt(lastFrame+1)), JField("trace", json_trace)))
+  }
+  // Generate the JSON Object for a single frame
+  def printFrameJSON(simTable : SimulationTable, frameNumber : Int, m : smt.Model, exprs : List[(Expr, String)], scope : Scope) : JObject = {
+    JObject(exprs.map { (e) => {
+      try {
+        // Generate the best-effort JSON-style counterexample
+        val exprs = simTable.map(ft => m.evalAsJSON(evaluate(e._1, ft(frameNumber), ft, frameNumber, scope)))
+        (e._2 -> JArray(exprs.toList)).asInstanceOf[JField]
+      } catch {
+        case excp : Utils.UnknownIdentifierException =>
+          (e._2 -> JArray(List(JString("<UNDEF>")))).asInstanceOf[JField]
+      }
+    }})
+  }
+
 // this function is unused
   def printSymbolTable(symbolTable : SymbolTable) {
     val keys = symbolTable.keys.toList.sortWith((l, r) => l.name < r.name)
@@ -1309,7 +1433,7 @@ class SymbolicSimulator (module : Module) {
     exprs.foreach { (e) => {
       try {
         val result = m.evalAsString(evaluate(e._1.id, f, frameTbl, frameNumber, scope))
-        val value = (Try(if (result.toBoolean) BigInt(1) else BigInt(0)).toOption ++ Try(BigInt(result)).toOption).head
+        val value = (Try(if (result.toBoolean) BigInt(1) else BigInt(0)).toOption.++:(Try(BigInt(result)).toOption)).head
         vcd.wireChanged(e._2, value)
       } catch {
         case excp : Utils.UnknownIdentifierException =>
@@ -1374,6 +1498,8 @@ class SymbolicSimulator (module : Module) {
     e match {
       case id : Identifier =>
         isStatelessExpression(id, context)
+      case unit: UninterpretedTypeLiteral =>
+        isStatelessExpression(unit.toIdentifier, context)
       case ei : ExternalIdentifier =>
         true
       case lit : Literal =>
@@ -1387,14 +1513,24 @@ class SymbolicSimulator (module : Module) {
         inds.forall(ind => isStatelessExpr(ind, context)) &&
         args.forall(arg => isStatelessExpr(arg, context)) &&
         isStatelessExpr(value, context)
+      case OperatorApplication(RecordUpdate(ind, value), args) =>
+        isStatelessExpr(ind, context) && 
+        isStatelessExpr(value, context) &&
+        args.forall(arg => isStatelessExpr(arg, context))
       case opapp : OperatorApplication =>
         opapp.operands.forall(arg => isStatelessExpr(arg, context + opapp.op))
       case a : ConstArray =>
         isStatelessExpr(a.exp, context)
+      case r: ConstRecord => 
+        r.fieldvalues.forall(f => isStatelessExpr(f._2, context))
       case fapp : FuncApplication =>
         isStatelessExpr(fapp.e, context) && fapp.args.forall(a => isStatelessExpr(a, context))
       case lambda : Lambda =>
         isStatelessExpr(lambda.e, context + lambda)
+      case QualifiedIdentifier(_, _) | IndexedIdentifier(_, _) | QualifiedIdentifierApplication(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for QualifiedIdentifier and IndexedIdentifier is currently not supported")
+      case LetExpr(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
     }
   }
 
@@ -1593,19 +1729,10 @@ class SymbolicSimulator (module : Module) {
       }
     }
 
-    // Helper function to read from a record.
-    def recordSelect(field : String, rec : smt.Expr) = {
-      smt.OperatorApplication(smt.RecordSelectOp(field), List(rec))
-    }
-    // Helper function to update a record.
-    def recordUpdate(field : String, rec : smt.Expr, newVal : smt.Expr) = {
-      smt.OperatorApplication(smt.RecordUpdateOp(field), List(rec, newVal))
-    }
-
     def simulateRecordUpdateExpr(st : smt.Expr, fields : List[String], newVal : smt.Expr) : smt.Expr = {
       fields match {
         case hd :: tl =>
-          recordUpdate(hd, st, simulateRecordUpdateExpr(recordSelect(hd, st), tl, newVal))
+          smt.Converter.recordUpdate(hd, st, simulateRecordUpdateExpr(smt.Converter.recordSelect(hd, st), tl, newVal))
         case Nil =>
           newVal
       }

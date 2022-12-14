@@ -93,6 +93,8 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
     e match {
       case id : Identifier =>
         isStatelessExpression(id, context)
+      case unit: UninterpretedTypeLiteral =>
+        isStatelessExpression(unit.toIdentifier, context)
       case _ : ExternalIdentifier =>
         true
       case _ : Literal =>
@@ -106,6 +108,9 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
         inds.forall(ind => isStatelessExpr(ind, context)) &&
         args.forall(arg => isStatelessExpr(arg, context)) &&
         isStatelessExpr(value, context)
+      case OperatorApplication(RecordUpdate(id, expr), args) =>
+        isStatelessExpr(expr, context) &&
+        args.forall(a => isStatelessExpr(a, context))
       case OperatorApplication(FiniteForallOp(_, gId), _) =>
         val opapp = e.asInstanceOf[OperatorApplication]
         isStatelessExpr(gId, context) &&
@@ -118,10 +123,16 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
         opapp.operands.forall(arg => isStatelessExpr(arg, context + opapp.op))
       case a : ConstArray =>
         isStatelessExpr(a.exp, context)
+      case r : ConstRecord => 
+        r.fieldvalues.forall(f => isStatelessExpr(f._2, context))
       case fapp : FuncApplication =>
         isStatelessExpr(fapp.e, context) && fapp.args.forall(a => isStatelessExpr(a, context))
       case lambda : Lambda =>
         isStatelessExpr(lambda.e, context + lambda)
+      case QualifiedIdentifier(_, _) | IndexedIdentifier(_, _) | QualifiedIdentifierApplication(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for QualifiedIdentifier and IndexedIdentifier is currently not supported")
+      case LetExpr(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
     }
   }
   def rewriteIdentifierToExternalId(moduleName : Identifier, id : Identifier, context : Scope) : Expr = {
@@ -155,6 +166,8 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
     e match {
       case id : Identifier =>
         rewriteIdentifierToExternalId(moduleName, id, context)
+      case unit: UninterpretedTypeLiteral =>
+        rewriteIdentifierToExternalId(moduleName, unit.toIdentifier, context)
       case ei : ExternalIdentifier =>
         ei
       case lit : Literal =>
@@ -171,12 +184,19 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
         val esP = es.map(e => rewrite(e, context))
         val valueP = rewrite(value, context)
         OperatorApplication(ArrayUpdate(indsP, valueP), esP)
+      case OperatorApplication(RecordUpdate(id, expr), es) =>
+        val esP = es.map(e => rewrite(e, context))
+        val exprP = rewrite(expr, context)
+        OperatorApplication(RecordUpdate(id, exprP), esP)
       case opapp : OperatorApplication =>
         val operandsP = opapp.operands.map(arg => rewrite(arg, context + opapp.op))
         OperatorApplication(opapp.op, operandsP)
       case a : ConstArray =>
         val eP = rewrite(a.exp, context)
         ConstArray(eP, a.typ)
+      case r : ConstRecord =>
+        val fsP = r.fieldvalues.map(f => (f._1, rewrite(f._2, context)))
+        ConstRecord(fsP)
       case fapp : FuncApplication =>
         val eP = rewrite(fapp.e, context)
         val argsP = fapp.args.map(rewrite(_, context))
@@ -184,6 +204,9 @@ class StatelessAxiomFinderPass(mainModuleName: Identifier)
       case lambda : Lambda =>
         val expP = rewrite(lambda.e, context + lambda)
         Lambda(lambda.ids, expP)
+      case _ : QualifiedIdentifier | _ : IndexedIdentifier | _ : QualifiedIdentifierApplication => throw new Utils.UnimplementedException("ERROR: QualifiedIdentifier and IndexedIdentifier are currently not supported")
+      case _ : LetExpr => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
     }
   }
   override def applyOnModule(d : TraversalDirection.T, module: Module, in : T, context : Scope) : T = {

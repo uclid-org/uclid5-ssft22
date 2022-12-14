@@ -186,27 +186,43 @@ object ReplacePolymorphicOperators {
     bvOp.pos = op.pos
     bvOp
   }
-  def toFloat(op : PolymorphicOperator) : FloatArgOperator = {
+  def toFloat(op : PolymorphicOperator, e: Int, s: Int) : FloatArgOperator = {
     val fltOp = op match {
-      case LTOp() => FPLTOp()
-      case GTOp() => FPGTOp()
-      case LEOp() => FPLEOp()
-      case GEOp() => FPGEOp()
-      case AddOp() => FPAddOp()
-      case SubOp() => FPSubOp()
-      case MulOp() => FPMulOp()
-      case DivOp() => FPDivOp()
-      case UnaryMinusOp() => FPUnaryMinusOp()
+      case LTOp() => FPLTOp(e,s)
+      case GTOp() => FPGTOp(e,s)
+      case LEOp() => FPLEOp(e,s)
+      case GEOp() => FPGEOp(e,s)
+      case AddOp() => FPAddOp(e,s)
+      case SubOp() => FPSubOp(e,s)
+      case MulOp() => FPMulOp(e,s)
+      case DivOp() => FPDivOp(e,s)
+      case UnaryMinusOp() => FPUnaryMinusOp(e,s)
     }
     fltOp.pos = op.pos
     fltOp
+  }
+  def toReal(op : PolymorphicOperator) : RealArgOperator = {
+    val rlOp = op match {
+      case LTOp() => RealLTOp()
+      case GTOp() => RealGTOp()
+      case LEOp() => RealLEOp()
+      case GEOp() => RealGEOp()
+      case AddOp() => RealAddOp()
+      case SubOp() => RealSubOp()
+      case MulOp() => RealMulOp()
+      case DivOp() => RealDivOp()
+      case UnaryMinusOp() => RealUnaryMinusOp()
+    }
+    rlOp.pos = op.pos
+    rlOp
   }
 
   def toType(op : PolymorphicOperator, typ : NumericType) = {
     typ match {
       case _ : IntegerType => toInt(op)
+      case rlTyp : RealType => toReal(op)
       case bvTyp : BitVectorType => toBitvector(op, bvTyp.width)
-      case fltTyp: FloatType => toFloat(op)
+      case fltTyp: FloatType => toFloat(op, fltTyp.exp, fltTyp.sig)
     }
   }
   def rewrite(e : Expr, typ : NumericType) : Expr = {
@@ -215,6 +231,7 @@ object ReplacePolymorphicOperators {
 
     e match {
       case _ : Identifier => e
+      case _ : UninterpretedTypeLiteral => e
       case _ : ExternalIdentifier => e
       case _ : Literal => e
       case Tuple(es) => Tuple(es.map(r(_)))
@@ -223,15 +240,22 @@ object ReplacePolymorphicOperators {
           case p : PolymorphicOperator => toType(p, typ)
           case ArraySelect(es) => ArraySelect(rs(es))
           case ArrayUpdate(es, e) => ArrayUpdate(rs(es), r(e))
+          case RecordUpdate(id, e) => RecordUpdate(id, r(e))
           case _ => op
         }
         OperatorApplication(opP, rs(operands))
       case ConstArray(exp, typ) =>
         ConstArray(r(exp), typ)
+      case ConstRecord(fs) => 
+        ConstRecord(fs.map(f => (f._1, r(f._2))))
       case FuncApplication(expr, args) =>
         FuncApplication(r(expr), rs(args))
       case Lambda(args, expr) =>
         Lambda(args, r(expr))
+      case QualifiedIdentifier(_, _) | IndexedIdentifier(_, _) | QualifiedIdentifierApplication(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: QualifiedIdentifierApplication is currently not supported")
+      case LetExpr(_, _) => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
     }
   }
 }
@@ -246,6 +270,7 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
 
   var polyOpMap : MutableMap[IdGenerator.Id, Operator] = MutableMap.empty
   var bvOpMap : MutableMap[IdGenerator.Id, Int] = MutableMap.empty
+  var fpOpMap : MutableMap[IdGenerator.Id, (Int, Int)] = MutableMap.empty
 
   override def reset() = {
     memo.clear()
@@ -363,9 +388,12 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
             case bv : BitVectorType =>
               polyOpMap.put(polyOp.astNodeId, ReplacePolymorphicOperators.toBitvector(polyOp, bv.width))
               polyResultType(polyOp, bv)
-            case flt: FloatType => 
-              polyOpMap.put(polyOp.astNodeId, ReplacePolymorphicOperators.toFloat(polyOp))
-              polyResultType(polyOp, flt)
+            case fp: FloatType => 
+              polyOpMap.put(polyOp.astNodeId, ReplacePolymorphicOperators.toFloat(polyOp, fp.exp, fp.sig))
+              polyResultType(polyOp, fp)
+            case rl: RealType => 
+              polyOpMap.put(polyOp.astNodeId, ReplacePolymorphicOperators.toReal(polyOp))
+              polyResultType(polyOp, rl)
             case _ => throw new Utils.UnimplementedException("Unknown operand type to polymorphic operator '" + opapp.op.toString + "'")
           }
         }
@@ -387,10 +415,29 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
           checkTypeError(argTypes.size == floatOp.arity, "Operator '%s' must have exactly %d argument(s)".format(opapp.op.toString, floatOp.arity), opapp.pos, c.filename)
           checkTypeError(argTypes.forall(_.isInstanceOf[FloatType]), "Argument(s) to operator '" + opapp.op.toString + "' must be of type float", opapp.pos, c.filename)
           floatOp match {
-            case FPGTOp() | FPLTOp()| FPGEOp() | FPLEOp()| FPIsNanOp() =>
+            case FPGTOp(_,_) | FPLTOp(_,_)| FPGEOp(_,_) | FPLEOp(_,_)| FPIsNanOp(_,_) =>
+              val e = argTypes(0).asInstanceOf[FloatType].exp
+              val s = argTypes(0).asInstanceOf[FloatType].sig
+              fpOpMap.put(floatOp.astNodeId, (e,s))
               BooleanType()
-            case FPMulOp() | FPSubOp() | FPAddOp() | FPDivOp() | FPUnaryMinusOp()  =>
-              FloatType()
+            case FPMulOp(_,_) | FPSubOp(_,_)  | FPAddOp(_,_)  | FPDivOp(_,_)  | FPUnaryMinusOp(_,_)   =>
+              checkTypeError(floatOp.e != 0, "Invalid exponent width argument to '%s' operator".format(opapp.op.toString()), opapp.pos, c.filename)
+              checkTypeError(floatOp.s != 0, "Invalid significand width argument to '%s' operator".format(opapp.op.toString()), opapp.pos, c.filename)
+              FloatType(floatOp.e, floatOp.s)
+          }
+        }
+        case realOp : RealArgOperator => {
+          def numArgs(op : RealArgOperator) : Int = {
+            op match {
+              case RealUnaryMinusOp() => 1
+              case _ => 2
+            }
+          }
+          checkTypeError(argTypes.size == numArgs(realOp), "Operator '" + opapp.op.toString + "' must have two arguments", opapp.pos, c.filename)
+          checkTypeError(argTypes.forall(_.isInstanceOf[RealType]), "Arguments to operator '" + opapp.op.toString + "' must be of type Real", opapp.pos, c.filename)
+          realOp match {
+            case RealLTOp() | RealLEOp() | RealGTOp() | RealGEOp() => new BooleanType()
+            case RealAddOp() | RealSubOp() | RealMulOp() | RealDivOp() | RealUnaryMinusOp() => new RealType()
           }
         }
 
@@ -585,6 +632,15 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
           }
           checkTypeError(typeOf(e, c) == arrayType.outType, "Invalid type of update value", e.pos, c.filename)
           arrayType
+        case RecordUpdate(id, e) =>
+          Utils.assert(argTypes.size == 1, "Expected only one argument to record update operator")
+          checkTypeError(argTypes(0).isRecord, "Expected a record here", opapp.operands(0).pos, c.filename)
+          val recordType = argTypes(0).asInstanceOf[lang.RecordType]
+          val recordFieldTypes = recordType.fields
+          checkTypeError(recordFieldTypes.map(a => a._1) contains id, "Invalid field-name in record update operator", id.pos, c.filename)
+          val fieldType = recordFieldTypes.filter(a => (a._1.name == id.name))(0)._2
+          checkTypeError(typeOf(e, c) == fieldType, "Invalid value-type in record update operator", id.pos, c.filename)
+          recordType
         case SelectFromInstance(field) =>
           Utils.assert(argTypes.size == 1, "Select operator must have exactly one operand.")
           val inst= argTypes(0)
@@ -672,7 +728,9 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
         case _ : BoolLit => BooleanType()
         case _ : IntLit => IntegerType()
         case _ : StringLit => StringType()
-        case _ : FloatLit => FloatType()
+        case unLit : UninterpretedTypeLiteral => unLit.typeOf
+        case fp : FloatLit => FloatType(fp.exp, fp.sig)
+        case rl : RealLit => RealType()
         case bv : BitVectorLit => BitVectorType(bv.width)
         case a : ConstArray =>
           val valTyp = typeOf(a.exp, c)
@@ -684,10 +742,18 @@ class ExpressionTypeCheckerPass extends ReadOnlyPass[Set[Utils.TypeError]]
               raiseTypeError("Expected an array type", a.typ.pos, c.filename)
               UndefinedType()
           }
+        case r : ConstRecord => 
+          val fieldnames = r.fieldvalues.map(f => f._1.name)
+          checkTypeError(fieldnames.size == fieldnames.toSet.size, "Duplicate field-names in ConstRecord", r.pos, c.filename)
+          new RecordType(r.fieldvalues.map(f => (f._1, typeOf(f._2, c))))
         case r : Tuple => new TupleType(r.values.map(typeOf(_, c)))
         case opapp : OperatorApplication => opAppType(opapp)
         case fapp : FuncApplication => funcAppType(fapp)
         case lambda : Lambda => lambdaType(lambda)
+        case QualifiedIdentifier(_, _) | IndexedIdentifier(_, _) | QualifiedIdentifierApplication(_, _) => 
+          throw new Utils.UnimplementedException("ERROR: SMT expr generation for QualifiedIdentifier and IndexedIdentifier is currently not supported")
+        case LetExpr(_, _) => 
+          throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
       }
       memo.put(e.astNodeId, typ)
       return typ
@@ -743,7 +809,9 @@ class PolymorphicTypeRewriterPass extends RewritePass {
             case BVARightShiftBVOp(_) => width.flatMap((w) => Some(BVARightShiftBVOp(w)))
             case BVUremOp(_) => width.flatMap((w) => Some(BVUremOp(w)))
             case BVSremOp(_) => width.flatMap((w) => Some(BVSremOp(w)))
-            case BVUDivOp(_) => width.flatMap((w)=> Some(BVUDivOp(w)))  
+            case BVUDivOp(_) => width.flatMap((w)=> Some(BVUDivOp(w))) 
+            case BVDivOp(_) => width.flatMap((w)=> Some(BVUDivOp(w)))  
+            case BVMulOp(_) => width.flatMap((w)=> Some(BVMulOp(w)))  
             case _ => Some(bv)
           }
           newOp match {
@@ -757,6 +825,36 @@ class PolymorphicTypeRewriterPass extends RewritePass {
           }
         } else {
           Some(bv)
+        }
+      }
+      case fp : FloatArgOperator => {
+        if (fp.e == 0 && fp.s == 0) {
+          val width = typeCheckerPass.fpOpMap.get(fp.astNodeId)
+          // val e = width._1
+          // val s = width._2
+          Utils.assert(width.isDefined, "No exponent and significant sizes available for: " + fp.toString)
+          val newOp = fp match {
+            case FPLTOp(_,_) => width.flatMap((w) => Some(FPLTOp(w._1, w._2)))
+            case FPLEOp(_,_) => width.flatMap((w) => Some(FPLEOp(w._1, w._2)))
+            case FPGTOp(_,_) => width.flatMap((w) => Some(FPGTOp(w._1, w._2)))
+            case FPGEOp(_,_) => width.flatMap((w) => Some(FPGEOp(w._1, w._2)))
+            case FPDivOp(_,_) => width.flatMap((w)=> Some(FPDivOp(w._1, w._2)))  
+            case FPMulOp(_,_) => width.flatMap((w)=> Some(FPMulOp(w._1, w._2))) 
+            case FPIsNanOp(_,_) => width.flatMap((w)=> Some(FPIsNanOp(w._1, w._2))) 
+            case FPUnaryMinusOp(_,_) => width.flatMap((w)=> Some(FPUnaryMinusOp(w._1, w._2))) 
+            case _ => Some(fp)
+          }
+          newOp match {
+            case Some(newOp) =>
+              val opWithPos = newOp
+              opWithPos.pos = fp.pos
+              Some(opWithPos)
+            case None =>
+              // should never get here.
+              None
+          }
+        } else {
+          Some(fp)
         }
       }
       case _ => Some(op)
@@ -776,8 +874,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
   var typeMap: MutableMap[GrammarTerm, Type] = MutableMap.empty
 
   /** Returns the type for a grammar term
-   *  @term The grammar term
-   *  @ctx  Context of the current AST visit
+   *  @param term The grammar term
+   *  @param ctx  Context of the current AST visit
    */
   def getTermType(term: GrammarTerm, ctx: Scope): Type = {
     // Try to find type from the memoized type map
@@ -796,7 +894,7 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Infers the type of the operator application term
    *
-   *  @opAppTerm The operator application term whose operator is polymorphic
+   *  @param opAppTerm The operator application term whose operator is polymorphic
    */
   def getReifiedOpType(opAppTerm: OpAppTerm): Option[Type] = {
     Utils.assert(opAppTerm.op.isPolymorphic, "Cannot get reified op type of a non polymorphic operator " + opAppTerm.op + ".")
@@ -810,7 +908,7 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
    *
    *  TODO(kkmc): Add BVSignExtOp and BVZeroExtOp
    *
-   *  @opAppTerm The operator application term to infer the type for
+   *  @param param opAppTerm The operator application term to infer the type for
    */
   def getOpAppTermType(opAppTerm: OpAppTerm): Type = {
     Utils.assert(!opAppTerm.op.isPolymorphic, "Cannot infer type of polymorphic operator " + opAppTerm.op.toString + ".")
@@ -828,7 +926,7 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Computes the reified operator for the given OpAppTerm
    *
-   *  @opAppTerm Operator application term
+   *  @param opAppTerm Operator application term
    */
   def getReifiedOp(opAppTerm: OpAppTerm): Option[Operator] = {
     // Return None if the operator is already reified reifify the operator
@@ -844,8 +942,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Update type map with function application type
    *
-   *  @funcAppTerm the function application whose type needs to be memoized
-   *  @ctx the current context
+   *  @param funcAppTerm the function application whose type needs to be memoized
+   *  @param ctx the current context
    */
   override def rewriteFuncAppTerm(funcAppTerm : FuncAppTerm, ctx : Scope) : Option[FuncAppTerm] = {
     val typ = ctx.typeOf(funcAppTerm.id).get
@@ -855,8 +953,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Rewrite the operator application with the reified type and update the type map
    *
-   *  @opAppTerm the operator application whose operator needs to be reified
-   *  @ctx the current context
+   *  @param opAppTerm the operator application whose operator needs to be reified
+   *  @param ctx the current context
    */
   override def rewriteOpAppTerm(opAppTerm : OpAppTerm, ctx : Scope) : Option[OpAppTerm] = {
     val reifiedOpOpt = getReifiedOp(opAppTerm)
@@ -873,8 +971,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Update type map with function application type
    *
-   *  @defineAppTerm the define-macro application whose type needs to be memoized
-   *  @ctx the current context
+   *  @param defineAppTerm the define-macro application whose type needs to be memoized
+   *  @param ctx the current context
    */
   override def rewriteDefineAppTerm(defineAppTerm : DefineAppTerm, ctx : Scope) : Option[DefineAppTerm] = {
     val typ = ctx.typeOf(defineAppTerm.id).get
@@ -884,8 +982,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Update type map with the literal term type
    *
-   *  @litTerm the term whose type needs to be memoized
-   *  @ctx the current context
+   *  @param litTerm the term whose type needs to be memoized
+   *  @param ctx the current context
    */
   override def rewriteLiteralTerm(litTerm : LiteralTerm, ctx : Scope) : Option[LiteralTerm] = {
     typeMap += (litTerm -> litTerm.lit.typeOf)
@@ -894,8 +992,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Update type map with the symbol term type
    *
-   *  @symTerm the term whose type needs to be memoized
-   *  @ctx the current context
+   *  @param symTerm the term whose type needs to be memoized
+   *  @param ctx the current context
    */
   override def rewriteSymbolTerm(symTerm : SymbolTerm, ctx : Scope) : Option[SymbolTerm] = {
     val typ = getTermType(symTerm, ctx)
@@ -905,8 +1003,8 @@ class PolymorphicGrammarTypeRewriterPass extends RewritePass {
 
   /** Update type map with the constant term type
    *
-   *  @constTerm the term whose type needs to be memoized
-   *  @ctx the current context
+   *  @param constTerm the term whose type needs to be memoized
+   *  @param ctx the current context
    */
   override def rewriteConstantTerm(constTerm : ConstantTerm, ctx : Scope) : Option[ConstantTerm] = {
     typeMap += (constTerm -> constTerm.typ)
