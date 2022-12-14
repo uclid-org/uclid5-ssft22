@@ -213,11 +213,11 @@ class SynthLibInterface(args: List[String], sygusSyntax : Boolean) extends SMTLI
           val str = strP.stripLineEnd
           if (str.contains("unsat") || str.startsWith("(")) {
              SolverResult(Some(true), getModel(str))
-          } else if (str.contains("sat") || str.contains("unknown")){
+          } else if (str.contains("sat") || str.contains("unknown") || str.contains("fail")){
             UclidMain.printResult(str);
             SolverResult(Some(false), None)
           } else {
-            throw new Utils.AssertionError("Unexpected result from SMT solver: " + str.toString())
+            throw new Utils.AssertionError("Response from  solver: " + str.toString())
           }
         case None =>
           throw new Utils.AssertionError("Unexpected EOF result from SMT solver.")

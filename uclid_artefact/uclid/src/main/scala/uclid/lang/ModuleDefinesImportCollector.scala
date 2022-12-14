@@ -100,6 +100,8 @@ class ModuleDefinesImportCollectorPass extends ReadOnlyPass[List[Decl]] {
     e match {
       case id : Identifier =>
         isStatelessIdentifier(id, context)
+      case unit : UninterpretedTypeLiteral =>
+        isStatelessIdentifier(unit.toIdentifier, context)
       case _ : ExternalIdentifier =>
         true
       case _ : Literal =>
@@ -113,14 +115,23 @@ class ModuleDefinesImportCollectorPass extends ReadOnlyPass[List[Decl]] {
         inds.forall(ind => isStatelessExpr(ind, context)) &&
         args.forall(arg => isStatelessExpr(arg, context)) &&
         isStatelessExpr(value, context)
+      case OperatorApplication(RecordUpdate(id, expr), args) =>
+        isStatelessExpr(expr, context) &&
+        args.forall(arg => isStatelessExpr(arg, context))
       case opapp : OperatorApplication =>
         opapp.operands.forall(arg => isStatelessExpr(arg, context + opapp.op))
       case a : ConstArray =>
         isStatelessExpr(a.exp, context)
+      case r : ConstRecord =>
+        r.fieldvalues.forall(f => isStatelessExpr(f._2, context))
       case fapp : FuncApplication =>
         isStatelessExpr(fapp.e, context) && fapp.args.forall(a => isStatelessExpr(a, context))
       case lambda : Lambda =>
         isStatelessExpr(lambda.e, context + lambda)
+      case _ : QualifiedIdentifier | _ : IndexedIdentifier | _ : QualifiedIdentifierApplication => 
+        throw new Utils.UnimplementedException("ERROR: Module defines import for QualifiedIdentifier and IndexedIdentifier is currently not supported")
+      case _ : LetExpr => 
+        throw new Utils.UnimplementedException("ERROR: SMT expr generation for LetExpr is currently not supported")
     }
   }
   

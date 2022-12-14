@@ -73,11 +73,16 @@ object Utils {
     lazy val positionStr = (filename, pos) match {
       case (Some(f), Some(p)) => f.toString + ", line " + p.line.toString
       case (None, Some(p)) => "line " + p.line.toString
+      case (None,None) => ""
       case _ => ""
     }
     lazy val fullStr = pos match {
       case Some(p) => p.longString
-      case None => ""
+      case _ => ""
+    }
+    lazy val shortStr = pos match {
+      case Some(p) => p.longString.substring(0,p.longString.indexOf('\n'))
+      case _ => ""
     }
   }
   class TypeError(msg: String, pos: Option[Position], filename: Option[String]) extends ParserError(msg, pos, filename) {
@@ -200,5 +205,20 @@ class Memo[I, O](f : I => O) {
         item
       }
     }
+  }
+}
+
+class ObjectCounter[T] {
+  var counts = new scala.collection.mutable.HashMap[T, Int]
+  def getCount(key : T) : Int = {
+    counts.get(key) match {
+      case Some(i) => i
+      case None => 0
+    }
+  }
+  def incrCount (key : T) : Int = {
+    val v = getCount(key)
+    counts.put(key, v + 1)
+    v
   }
 }
