@@ -1,0 +1,75 @@
+module main {
+	var state_x : integer;
+	var state_y : integer;
+	var count: integer;
+	var last_action: integer;
+
+
+	define safe (x : integer, y: integer) : boolean = 
+		  (x >= 0 && x <= 11 && y >= 0 && y <=3) 
+		|| (y==4 && (x==0 || x==11));
+
+
+	grammar move_grammar (x: integer, y: integer) : integer = {
+		(start: integer) ::= 0 | 1 | 2 | 3 | 4 | (if (cond) then start else start);
+		(CondInt : integer) ::= x | y | 0 | 1 | 2 | 3 | 10 | 11 | 12;
+		(cond : boolean) ::= (CondInt == CondInt) | (CondInt <= CondInt) 
+		 | (!cond) | (cond && cond) | (cond || cond);
+	}
+
+	define move(x: integer, y: integer): integer = if(y==0) then 4 else 1;
+
+	// synthesis function move(x: integer, y: integer): integer
+	// grammar move_grammar(x,y);
+
+	init {
+		assume(safe(state_x, state_y));
+		count=0;
+	}
+
+	next {
+		var action: integer;
+		action = move(state_x, state_y);
+		last_action'=action;
+		case
+		// move up
+		  (action == 1) : { 
+		  	if (state_y > 0) 
+		  	{ state_y'=state_y-1 ;}
+		  	else {state_y'= state_y;}
+		  }
+		// move right
+		  (action==2) : {
+		  	if (state_x < 11) 
+		  	{state_x'=state_x+1 ;}
+		  else {state_x'=state_x;}
+		}
+		// move down
+		  (action == 3) : {
+		  	if (state_y < 4) 
+		  		{state_y'=state_y+1;} 
+		  	else {state_y'=state_y;}
+		  }
+		// move left
+		  (action==4) : {
+		  	if(state_x > 0) 
+		  	{state_x'=state_x-1;}
+		  else 
+		  	{state_x'=state_x;}
+		}
+		esac
+		count'=count+1;
+
+	}
+
+	invariant safety: safe(state_x, state_y);
+	invariant progress: if(count>14) then (state_x==0 && state_y==0) else true;
+
+	control {
+		f = bmc_noLTL(16);
+		check;
+		f.print_cex(state_x, state_y, count, last_action);
+	}
+
+
+}

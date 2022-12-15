@@ -16,6 +16,6 @@ ADD uclid.tar.gz /
 
 VOLUME /uclid_artefact
 
-ENV PATH="/uclid_artefact/bin:/uclid_artefact/uclid-0.9.5/bin:/uclid_artefact/uclid/z3/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/uclid_artefact/uclid/z3/bin:${PATH}"
+ENV PATH="/uclid_artefact/bin:/uclid_artefact/uclid-0.9.5/bin:/uclid_artefact/bin/z3-bin:${PATH}"
+ENV LD_LIBRARY_PATH="/uclid_artefact/bin/z3-bin:${LD_LIBRARY_PATH}"
 WORKDIR uclid_artefact

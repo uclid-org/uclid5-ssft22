@@ -34,6 +34,11 @@ the instructions here: https://docs.docker.com/desktop/windows/wsl/
 
 ### Using the pre-saved docker image
 
+The presaved docker image is available here:
+
+https://uoe-my.sharepoint.com/:u:/g/personal/epolgree_ed_ac_uk/Ec9vt-RHSOdKguEcp7FQ4-kB9FVXznop9MKwwDTArobbmg?e=prHgoo
+
+
 If your image is split into several tarballs, first combine them. For example:
 ~~~
 cat uclid_image.tar.gza* >uclid_image.tar.gz
