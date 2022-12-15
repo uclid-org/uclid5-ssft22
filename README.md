@@ -58,7 +58,7 @@ The docker image mounts a folder containing the following directories and files:
 - uclid_artefact/bin - precompiled binaries for UCLID5, Z3, CVC4, CVC5, and
 delphi. The docker image automatically adds this to the path.
 - uclid_artefact/examples - examples to run UCLID5 on
-- uclid_artefact/uclid - the source code for UCLID5
+
 
 
 ## Other notes:
