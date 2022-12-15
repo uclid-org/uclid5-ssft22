@@ -1,7 +1,7 @@
 #!/bin/bash
 
-echo "Moving into openAi gym directory"
-cd OpenAIGym
+echo "Moving into CliffWalking (OpenAI gym) directory"
+cd CliffWalking
 
 echo "Running uclid on cliff walking.ucl to synthesis agent... this takes a while"
 echo "uclid -y \"cvc5 --lang=sygus2\" cliff_walking.ucl"
