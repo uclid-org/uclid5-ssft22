@@ -1,5 +1,38 @@
 # UCLID5 artifact
 
+## VSCode Integration Instructions For Mac
+
+1. [Install Docker Desktop 2.0+](https://www.docker.com/).
+1. [Install the Remote Development extension pack in VSCode](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.vscode-remote-extensionpack).
+1. Close VSCode.
+1. [Download the UCLID5 docker image](https://uoe-my.sharepoint.com/:u:/g/personal/epolgree_ed_ac_uk/Ec9vt-RHSOdKguEcp7FQ4-kB9FVXznop9MKwwDTArobbmg?e=ywpe5S).
+1. Open a terminal.
+1. In the terminal, start docker: `open -a Docker`.
+1. In the terminal, load the UCLID5 docker image: `docker load -i uclid_image.tar.gz`.
+1. Open this folder (the folder containing this README) in VSCode.
+1. You should be prompted to "Reopen in Container". Do this.
+1. If you are not prompted, run the VSCode command (cmd+shift+p) `Dev Containers: Open Folder in Container...` and select this folder.
+1. Once that is done, your VSCode terminal prompt should be something like `root@109b4b361c47:/workspaces/uclid5-ssft22# `.
+1. Test that everything works by running `uclid uclid_artefact/examples/Inv/inv1.ucl`. You should see
+```
+Successfully instantiated 1 module(s).
+1 assertions passed.
+1 assertions failed.
+0 assertions indeterminate.
+  PASSED -> vobj: induction_base [Step #0] property y_ge_1 @ uclid_artefact/examples/Inv/inv1.ucl, line 24
+  FAILED -> vobj: induction_step [Step #1] property y_ge_1 @ uclid_artefact/examples/Inv/inv1.ucl, line 24
+CEX for vobj: induction_step [Step #1] property y_ge_1 @ uclid_artefact/examples/Inv/inv1.ucl, line 24
+=================================
+Step #0
+  x : -1
+  y : 1
+=================================
+=================================
+Step #1
+  x : 0
+  y : 0
+=================================
+Finished execution for module: main.
 
 ## Instructions for setup with docker
 
