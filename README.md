@@ -2,18 +2,22 @@
 
 ## VSCode Integration Instructions For Mac
 
-1. [Install Docker Desktop 2.0+](https://www.docker.com/).
 1. [Install the Remote Development extension pack in VSCode](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.vscode-remote-extensionpack).
-1. Close VSCode.
-1. [Download the UCLID5 docker image](https://uoe-my.sharepoint.com/:u:/g/personal/epolgree_ed_ac_uk/Ec9vt-RHSOdKguEcp7FQ4-kB9FVXznop9MKwwDTArobbmg?e=ywpe5S).
-1. Open a terminal.
-1. In the terminal, start docker: `open -a Docker`.
-1. In the terminal, load the UCLID5 docker image: `docker load -i uclid_image.tar.gz`.
-1. Open this folder (the folder containing this README) in VSCode.
-1. You should be prompted to "Reopen in Container". Do this.
-1. If you are not prompted, run the VSCode command (cmd+shift+p) `Dev Containers: Open Folder in Container...` and select this folder.
-1. Once that is done, your VSCode terminal prompt should be something like `root@109b4b361c47:/workspaces/uclid5-ssft22# `.
-1. Test that everything works by running `uclid uclid_artefact/examples/Inv/inv1.ucl`. You should see
+2. Close VSCode.
+3. [Install Docker Desktop 2.0+](https://www.docker.com/).
+4. [Download the UCLID5 docker image](https://uoe-my.sharepoint.com/:u:/g/personal/epolgree_ed_ac_uk/Ec9vt-RHSOdKguEcp7FQ4-kB9FVXznop9MKwwDTArobbmg?e=ywpe5S) (this is a file named `uclid_image.tar.gz`).
+5. Open a terminal.
+6. In the terminal, start docker: `open -a Docker` 
+  - this command may be different on Windows/Linux.
+  - this command runs in the background and may take a minute to terminate.
+7. In the terminal, load the UCLID5 docker image: `docker load -i uclid_image.tar.gz`
+  - this command may be different on Windows/Linux.
+8. Open this folder (the folder containing this README) in VSCode.
+9. You should be prompted to "Reopen in Container". Do this.
+10. If you are not prompted, run the VSCode command `Dev Containers: Open Folder in Container...` and select this folder.
+  - Use cmd+shift+p to run VSCode commands on Mac.
+11. Once that is done, your VSCode terminal prompt should be something like `root@109b4b361c47:/workspaces/uclid5-ssft22# `.
+12. Test that everything works by running `uclid uclid_artefact/examples/Inv/inv1.ucl`. You should see
 ```
 Successfully instantiated 1 module(s).
 1 assertions passed.
