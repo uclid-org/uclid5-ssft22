@@ -12,10 +12,12 @@ RUN apt-get --fix-missing -y install \
         sudo time default-jdk \
         g++ gcc flex bison make git curl patch cmake vim emacs
 
-ADD uclid.tar.gz /
+ADD uclid_image.tar.gz /
 
 VOLUME /uclid_artefact
 
-ENV PATH="/uclid_artefact/bin:/uclid_artefact/uclid-0.9.5/bin:/uclid_artefact/bin/z3-bin:${PATH}"
-ENV LD_LIBRARY_PATH="/uclid_artefact/bin/z3-bin:${LD_LIBRARY_PATH}"
+ENV PATH="/workspaces/uclid5-ssft22/uclid_artefact/bin:${PATH}"
+ENV PATH="/workspaces/uclid5-ssft22/uclid_artefact/uclid-0.9.5/bin:${PATH}"
+ENV PATH="/workspaces/uclid5-ssft22/uclid_artefact/bin/z3-bin:${PATH}"
+ENV LD_LIBRARY_PATH="/workspaces/uclid5-ssft22/uclid_artefact/bin/z3-bin:${LD_LIBRARY_PATH}"
 WORKDIR uclid_artefact
